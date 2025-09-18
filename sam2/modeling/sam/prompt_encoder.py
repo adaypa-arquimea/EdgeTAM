@@ -92,12 +92,30 @@ class PromptEncoder(nn.Module):
         point_embedding = self.pe_layer.forward_with_coords(
             points, self.input_image_size
         )
-        point_embedding[labels == -1] = 0.0
-        point_embedding[labels == -1] += self.not_a_point_embed.weight
-        point_embedding[labels == 0] += self.point_embeddings[0].weight
-        point_embedding[labels == 1] += self.point_embeddings[1].weight
-        point_embedding[labels == 2] += self.point_embeddings[2].weight
-        point_embedding[labels == 3] += self.point_embeddings[3].weight
+        #point_embedding[labels == -1] = 0.0
+        #point_embedding[labels == -1] += self.not_a_point_embed.weight
+        #point_embedding[labels == 0] += self.point_embeddings[0].weight
+        #point_embedding[labels == 1] += self.point_embeddings[1].weight
+        #point_embedding[labels == 2] += self.point_embeddings[2].weight
+        #point_embedding[labels == 3] += self.point_embeddings[3].weight
+        # ONNX / DLC friendly
+        labels = labels.to(torch.long)
+         def embed_for_label(label_value: int, embed_weight: torch.Tensor) -> torch.Tensor:
+            mask = (labels == label_value).unsqueeze(-1)
+            emb = embed_weight.view(1, 1, -1)
+            return torch.where(mask, emb, torch.zeros_like(point_embedding))
+
+        embedded = (
+            embed_for_label(0, self.point_embeddings[0].weight[0]) +
+            embed_for_label(1, self.point_embeddings[1].weight[0]) +
+            embed_for_label(2, self.point_embeddings[2].weight[0]) +
+            embed_for_label(3, self.point_embeddings[3].weight[0])
+        )
+        point_embedding = torch.where(
+            (labels == -1).unsqueeze(-1),
+            self.not_a_point_embed.weight[0].view(1, 1, -1),
+            point_embedding + embedded
+        )
         return point_embedding
 
     def _embed_boxes(self, boxes: torch.Tensor) -> torch.Tensor:
