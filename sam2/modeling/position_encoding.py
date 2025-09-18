@@ -271,3 +271,45 @@ def apply_rotary_enc_v2(
             B, N_heads, N_tokens, C_per_head
         )
     return x_out
+
+def apply_rotary_enc_v3(
+    x: torch.Tensor,
+    freqs_cis: torch.Tensor,
+    repeat_freqs: int,
+):
+    # no keys to rotate, due to dropout
+    if repeat_freqs == 0:
+        assert x.shape[-2] == 0
+    if x.shape[-2] == 0:
+        return x
+
+    cos_freqs = freqs_cis.real  # Shape: (..., seq_len, dim//2)
+    sin_freqs = freqs_cis.imag  # Shape: (..., seq_len, dim//2)
+
+    B, N_heads, N_tokens, C_per_head = x.shape
+    if N_tokens == freqs_cis.shape[0] * repeat_freqs:
+        x_rope = x
+        x_no_rope = None
+    else:
+        rope_tokens = freqs_cis.shape[0]
+        no_rope_tokens = N_tokens // repeat_freqs - rope_tokens
+        x = x.view(B, N_heads, repeat_freqs, N_tokens // repeat_freqs, C_per_head)
+        x_rope = x[..., no_rope_tokens:, :].reshape(B, N_heads, -1, C_per_head)
+        x_no_rope = x[..., :no_rope_tokens, :].reshape(B, N_heads, -1, C_per_head)
+
+    x_pairs = x_rope.reshape(*x_rope.shape[:-1], -1, 2)
+    x_re, x_im = x_pairs[..., 0], x_pairs[..., 1]
+
+    if repeat_freqs > 1:
+        cos_freqs = cos_freqs.repeat(repeat_freqs, *([1] * (cos_freqs.ndim - 1)))
+        sin_freqs = sin_freqs.repeat(repeat_freqs, *([1] * (sin_freqs.ndim - 1)))
+
+    # Apply rotation
+    x_re_out = x_re * cos_freqs - x_im * sin_freqs
+    x_im_out = x_re * sin_freqs + x_im * cos_freqs
+    x_out = torch.stack([x_re_out, x_im_out], dim=-1).reshape(B, N_heads, -1, C_per_head)
+
+    # Combine with non-rotated part
+    if x_no_rope is not None:
+        x_out = torch.cat([x_no_rope, x_out], dim=-2)
+    return x_out
