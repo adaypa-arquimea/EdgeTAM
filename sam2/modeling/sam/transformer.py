@@ -336,7 +336,7 @@ class RoPEAttention(Attention):
             assert self.rope_k_repeat
 
         num_k_rope = k.size(-2) - num_k_exclude_rope
-        q, k[:, :, :num_k_rope] = apply_rotary_enc(
+        q, k[:, :, :num_k_rope] = apply_rotary_enc_mat_v1(
             q,
             k[:, :, :num_k_rope],
             freqs_cis=self.freqs_cis,
@@ -410,7 +410,7 @@ class RoPEAttentionv2(Attention):
         self.freqs_cis_k = self.freqs_cis_k.to(q.device)
         q = apply_rotary_enc_v2(q, self.freqs_cis_q, repeat_freqs=1)
         num_k_rope = k.size(-2) - num_k_exclude_rope
-        k[:, :, :num_k_rope] = apply_rotary_enc_v2(
+        k[:, :, :num_k_rope] = apply_rotary_enc_v3(
             k[:, :, :num_k_rope], self.freqs_cis_k, repeat_freqs=rope_k_repeat
         )
 
