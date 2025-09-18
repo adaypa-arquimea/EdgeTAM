@@ -313,3 +313,68 @@ def apply_rotary_enc_v3(
     if x_no_rope is not None:
         x_out = torch.cat([x_no_rope, x_out], dim=-2)
     return x_out
+
+
+def apply_rotary_enc_mat_v1(
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    freqs_cis: torch.Tensor,
+    repeat_freqs_k: bool = False,
+):
+    """
+    Apply rotary positional encoding to query and key tensors using matrix multiplication.
+
+    Args:
+        xq (torch.Tensor): Query tensor, shape (..., seq_len, dim).
+        xk (torch.Tensor): Key tensor, shape (..., seq_len_k, dim).
+        freqs_cis (torch.Tensor): Precomputed frequency tensor, shape (..., seq_len, dim//2), complex.
+        repeat_freqs_k (bool): Whether to repeat freqs_cis to match xk's sequence length.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Rotated query and key tensors.
+    """
+    # Ensure all tensors are on the same device
+    device = xq.device
+    xq = xq.to(device)
+    xk = xk.to(device)
+    freqs_cis = freqs_cis.to(device)
+
+    # Get cosine and sine from freqs_cis (assuming freqs_cis is complex)
+    cos_theta = freqs_cis.real  # Shape: (..., seq_len, dim//2)
+    sin_theta = freqs_cis.imag  # Shape: (..., seq_len, dim//2)
+
+    cos_theta = cos_theta.view(1, 1, cos_theta.shape[0], cos_theta.shape[1])
+    sin_theta = sin_theta.view(1, 1, sin_theta.shape[0], sin_theta.shape[1])
+
+    # Reshape xq and xk to (..., seq_len, dim//2, 2) for pairwise processing
+    xq_ = xq.float().reshape(*xq.shape[:-1], -1, 2)  # Shape: (..., seq_len, dim//2, 2)
+    xk_ = xk.float().reshape(*xk.shape[:-1], -1, 2) if xk.shape[-2] != 0 else None
+
+    # Apply rotation to xq via matrix multiplication
+    xq_out = torch.stack([
+        xq_[..., 0] * cos_theta - xq_[..., 1] * sin_theta,
+        xq_[..., 0] * sin_theta + xq_[..., 1] * cos_theta,
+    ], dim=-1)
+    xq_out = xq_out.flatten(-2)  # Flatten back to (..., seq_len, dim)
+    xq_out = xq_out.type_as(xq)  # Restore original dtype
+
+    if xk_ is None:
+        # No keys to rotate (due to dropout)
+        return xq_out, xk
+
+    # Handle repeated freqs_cis for xk if needed
+    if repeat_freqs_k:
+        r = xk.shape[-2] // xq.shape[-2]
+        # Repeat cos_theta and sin_theta to match xk's sequence length
+        cos_theta = cos_theta.repeat(1, 1, r, 1)
+        sin_theta = sin_theta.repeat(1, 1, r, 1)
+
+    # Apply rotation to xk
+    xk_out = torch.stack([
+        xk_[..., 0] * cos_theta - xk_[..., 1] * sin_theta,
+        xk_[..., 0] * sin_theta + xk_[..., 1] * cos_theta,
+    ], dim=-1)
+    xk_out = xk_out.flatten(-2)  # Flatten back to (..., seq_len_k, dim)
+    xk_out = xk_out.type_as(xk)  # Restore original dtype
+
+    return xq_out, xk_out
