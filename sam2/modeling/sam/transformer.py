@@ -14,9 +14,11 @@ import torch
 import torch.nn.functional as F
 
 from sam2.modeling.position_encoding import (
-    apply_rotary_enc,
-    apply_rotary_enc_v2,
+    #apply_rotary_enc,
+    #apply_rotary_enc_v2,
     compute_axial_cis,
+    apply_rotary_enc_mat_v1,
+    apply_rotary_enc_v3
 )
 from sam2.modeling.sam2_utils import MLP
 from sam2.utils.misc import get_sdpa_settings
